@@ -1,0 +1,312 @@
+# Sección de Pádel — Requisitos de la aplicación
+
+> Versión: 1.0  
+> Estado: En desarrollo (prototipo)  
+> Última actualización: Abril 2026
+
+---
+
+## 1. Contexto general
+
+Aplicación web para gestionar la sección de pádel de un club deportivo con dos centros: **Club Cornellà Up** y **Club Delfos**. La sección cuenta con aproximadamente 300 jugadores.
+
+El sistema actual está basado en un Google Sheet con JavaScript que gestiona rankings, listas de inscripción y resultados. Esta aplicación sustituye y mejora ese sistema.
+
+---
+
+## 2. Usuarios y roles
+
+| Rol | Descripción |
+|---|---|
+| Jugador | Usuario estándar. Puede ver toda la información y apuntarse/darse de baja de los días de juego. |
+| Coordinador | Puede hacer todo lo anterior más introducir resultados, generar partidos y gestionar pistas. |
+| Admin | Gestión completa de la aplicación (jugadores, eventos, configuración). |
+
+### 2.1 Autenticación
+- Login mediante **Google** (OAuth) combinado con **invitación por admin**
+- Solo pueden acceder jugadores que el admin haya dado de alta previamente
+- El admin gestiona altas y bajas de jugadores desde el panel de administración
+
+---
+
+## 3. Tecnología
+
+| Capa | Tecnología |
+|---|---|
+| Frontend | Web app (HTML/CSS/JS o framework por definir) |
+| Backend / Base de datos | Supabase |
+| Hosting | Vercel |
+| Autenticación | Supabase Auth + Google OAuth |
+
+---
+
+## 4. Pestañas de la aplicación
+
+### 4.1 Ranking
+
+**Visible para:** todos los usuarios
+
+- Listado completo de jugadores de la sección ordenado por puntuación de ranking de mayor a menor
+- La fila del jugador logueado aparece resaltada
+- Columnas visibles por jugador:
+  - Posición en el ranking
+  - Nombre
+  - Partidos jugados (PJ)
+  - Partidos ganados (PG)
+  - Juegos jugados (JJ)
+  - Juegos ganados (JG)
+  - Eficacia (%)
+  - Penalización (%)
+  - Puntuación final de ranking
+
+#### Fórmula del ranking
+
+```
+Eficacia = (PG/PJ + JG/JJ) / 2
+Penalización = tabla discreta según número de partidos jugados
+Ranking = Eficacia × (1 − Penalización)
+```
+
+#### Tabla de penalización por pocos partidos
+
+| Partidos jugados | Penalización |
+|---|---|
+| 1 | 48% |
+| 2 | 43% |
+| 3 | 38% |
+| 4 | 33% |
+| 5 | 27% |
+| 6 | 20% |
+| 7 | 13% |
+| 8 | 5% |
+| 9+ | 0% |
+
+> La penalización existe para evitar que jugadores nuevos con pocos partidos suban demasiado rápido al ranking.
+
+#### Pendiente de implementar
+- Ponderación temporal: los partidos recientes ponderan más que los antiguos para que el ranking sea más dinámico. La fórmula exacta está por definir.
+- Ranking Manual Override: los coordinadores pueden asignar una posición temporal manual a un jugador.
+
+---
+
+### 4.2 Jugar
+
+**Visible para:** todos los usuarios
+
+Muestra los 7 días de la semana con sus listas de inscripción.
+
+#### Reglas de apertura de listas
+- Los días de la **semana actual** están siempre abiertos
+- Los días de la **semana siguiente** se abren el día anterior a las **19:00**
+  - Ejemplo: la lista del lunes siguiente se abre el lunes actual a las 19:00
+  - No se puede inscribir al martes siguiente hasta el martes actual a las 19:00
+
+#### Inscripción
+- El jugador puede apuntarse a un día si la lista está abierta
+- Al apuntarse debe indicar mediante un **checkbox** si es socio del Club Cornellà Up
+  - Este dato es informativo para el coordinador y se usa para calcular el coste de las pistas (los socios del Up tienen precio reducido)
+- El jugador puede **darse de baja** en cualquier momento mientras la lista esté abierta
+
+#### Visualización de la lista
+- Los apuntados se muestran ordenados por **ranking** (de mayor a menor)
+- Se muestra el número de **socios Up** en la cabecera de cada día
+- Los jugadores se dividen en **titulares** y **reserva** según las pistas disponibles:
+  - Titulares: primeros N×4 jugadores (N = número de pistas)
+  - Reserva: el resto, por orden de ranking
+- Los socios del Up aparecen con una etiqueta visible junto a su nombre
+
+---
+
+### 4.3 Partidos
+
+**Visible para:** todos los usuarios  
+**Generación de partidos:** solo coordinadores
+
+#### Vista jugador
+- Selecciona el día de la semana
+- Ve los partidos generados para ese día: pistas, grupos de jugadores y rotación de parejas
+- Si los partidos aún no se han generado, ve un mensaje informativo
+
+#### Vista coordinador (además de lo anterior)
+- Control del número de pistas disponibles ese día (+ / −)
+- Botón "Generar partidos" que agrupa automáticamente a los jugadores
+- Resumen: titulares, reserva y socios Up
+- Texto generado automáticamente listo para **copiar al WhatsApp** del día
+
+#### Lógica de generación de partidos
+- Se toman los inscritos del día ordenados por ranking
+- Entran como titulares los primeros **N×4** jugadores (N = pistas disponibles)
+- Los jugadores sobrantes pasan a **reserva**
+- Los titulares se agrupan en pistas de 4 jugadores por nivel:
+  - Pista 1: jugadores con ranking 1, 2, 3, 4 (nivel más alto)
+  - Pista 2: jugadores con ranking 5, 6, 7, 8
+  - Y así sucesivamente
+- Si el número de inscritos no es múltiplo de 4, los sobrantes van a reserva
+
+#### Formato rotativo de partidos
+Cada partido es de **4 jugadores** con rotación de parejas en cada set:
+
+| Set | Pareja izquierda | Pareja derecha |
+|---|---|---|
+| Set 1 | A + B | C + D |
+| Set 2 | A + C | B + D |
+| Set 3 | A + D | B + C |
+
+- Siempre son exactamente **3 sets** (una rotación por set)
+- Cada jugador juega con cada uno de los otros 3 exactamente una vez
+- Duración de cada partido: **90 minutos**
+- Los partidos son siempre por la tarde
+
+---
+
+### 4.4 Resultados
+
+**Visible para:** todos los usuarios (lectura)  
+**Introducción de resultados:** solo coordinadores
+
+#### Vista jugador
+- Historial de partidos con:
+  - Fecha y día de la semana
+  - Los 4 jugadores del partido
+  - Marcador de cada set con las parejas correspondientes
+  - Juegos ganados individuales por cada jugador
+
+#### Vista coordinador (además de lo anterior)
+- Formulario para introducir resultados:
+  - Fecha del partido
+  - Selección de los 4 jugadores (A, B, C, D)
+  - Marcador de cada set (set 1, set 2, set 3)
+- Al guardar, el sistema:
+  - Calcula automáticamente los juegos ganados individuales según la rotación
+  - Actualiza PJ, PG, JJ y JG de cada jugador
+  - Recalcula el ranking automáticamente
+
+#### Cálculo de juegos ganados individuales (formato rotativo)
+```
+JG[A] = set1.izq + set2.izq + set3.izq
+JG[B] = set1.izq + set2.der + set3.der
+JG[C] = set1.der + set2.izq + set3.der
+JG[D] = set1.der + set2.der + set3.izq
+```
+
+#### Determinación del ganador individual
+- Gana el partido el jugador con más **juegos ganados totales** de los 3 sets
+
+---
+
+### 4.5 Agenda
+
+**Visible para:** todos los usuarios (solo lectura)  
+**Gestión de eventos:** solo admin/coordinador
+
+- Calendario mensual navegable (mes anterior / mes siguiente)
+- Los días con eventos aparecen marcados con puntos de colores según el tipo
+- Al pulsar un día con evento se muestran los detalles
+- Si no se selecciona ningún día, se listan todos los eventos del mes
+
+#### Tipos de eventos
+| Tipo | Color |
+|---|---|
+| Torneo | Morado |
+| Social | Naranja/coral |
+| Otro (actividad, escapada, etc.) | Verde |
+
+#### Información de cada evento
+- Título
+- Fecha
+- Tipo
+- Descripción
+
+> Los partidos diarios de lunes a domingo **no** aparecen en la agenda. La agenda es exclusivamente para eventos especiales: torneos, actividades sociales, casa rural, calçotada, etc.
+
+---
+
+### 4.6 La sección
+
+**Visible para:** todos los usuarios
+
+Organigrama de la sección con información de contacto de cada miembro.
+
+#### Estructura organizativa
+
+**Coordinación general**
+- Coordinador General / Presidente
+
+**Área de gestión**
+- Tesorería
+- Soporte informático
+
+**Área deportiva y competición**
+- Coordinador Liga Social
+- Coordinador Torneos
+- Coordinador Liga Sumapadel
+- Coordinador Partidos Lunes
+- Coordinador Partidos Martes
+- Coordinador Partidos Miércoles
+- Coordinador Partidos Jueves
+- Coordinador Partidos Viernes
+- Coordinador Sábados
+- Coordinador Domingos
+
+**Área de comunicación y comunidad**
+- Coordinador Activismo y Redes
+- Coordinador Entretenimiento
+
+#### Información visible por persona
+- Foto (o avatar con iniciales si no hay foto)
+- Nombre completo
+- Rol
+- Email (clicable)
+- Teléfono (clicable)
+
+---
+
+## 5. Log de acciones
+
+**Visible para:** coordinadores y admin
+
+Registro de todas las acciones relevantes:
+
+| Campo | Descripción |
+|---|---|
+| Jugador | Quién realizó la acción |
+| Día | A qué lista afecta |
+| Acción | Apuntarse / Darse de baja |
+| Timestamp | Fecha y hora exacta |
+
+- El sistema detecta y marca inscripciones realizadas **fuera de horario** (antes de las 19:00 del día de apertura)
+
+---
+
+## 6. Panel de administración
+
+**Pendiente de desarrollar**
+
+Funcionalidades previstas:
+- Alta, baja y edición de jugadores
+- Gestión de eventos de la agenda
+- Ranking Manual Override (asignar posición temporal a un jugador)
+- Configuración de pistas fijas por día
+- Visualización del log de acciones
+
+---
+
+## 7. Reglas de negocio destacadas
+
+- Las pistas reservadas son fijas pero pueden añadirse más el día anterior o la mañana del partido
+- Solo entran en juego los jugadores que hayan cerrado su inscripción antes de que el coordinador genere los partidos
+- Los jugadores en reserva entran por orden de ranking si algún titular se da de baja
+- El coordinador del día es quien publica los partidos en el canal de WhatsApp correspondiente a ese día
+- Hay un canal de WhatsApp por cada día de la semana
+
+---
+
+## 8. Funcionalidades pendientes
+
+- [ ] Ponderación temporal del ranking (partidos recientes pesan más)
+- [ ] Ranking Manual Override
+- [ ] Panel de administración completo
+- [ ] Sistema de notificaciones (cuando se abren listas, cuando se generan partidos)
+- [ ] Historial de partidos por jugador (perfil individual)
+- [ ] Gestión de torneos internos
+- [ ] Exportación de datos / informes
